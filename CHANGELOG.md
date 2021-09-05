@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- index: Improve journal for sidecar changes
 - extractor: Add option for geo address server
 - extractor: Add error threshold for api calls
 - cast: Add reverse option
