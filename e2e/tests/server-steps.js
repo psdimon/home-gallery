@@ -3,13 +3,9 @@ const assert = require("assert")
 const fetch = require('node-fetch')
 const express = require('express')
 
-const { generateId, nextPort, runCliAsync, getBaseDir, getPath, getStorageDir, getDatabaseFilename, getEventsFilename } = require('../utils')
+const { generateId, nextPort, runCliAsync, getBaseDir, getPath, getStorageDir, getDatabaseFilename, getEventsFilename, readDatabase } = require('../utils')
 
 const servers = {}
-
-const wait = async ms => new Promise(resolve => setTimeout(resolve, ms))
-
-const onResponseNoop = res => res
 
 const insecureOption = {
   agent: new https.Agent({
@@ -17,34 +13,41 @@ const insecureOption = {
   })
 }
 
-const waitForUrl = async (url, timeout, onResponse) => {
+const fetchUrl = url => fetch(url, url.startsWith('https') ? insecureOption : {})
+  .then(res => {
+    if (!res.ok) {
+      throw new Error(`Non successfull response code: ${res.status}`)
+    }
+    return res
+  })
+
+const fetchDatabase = url => fetchUrl(`${url}/api/database.json`)
+  .then(res => res.json())
+  .then(database => {
+    if (!database.data.length) {
+      throw new Error(`Database is empty`)
+    }
+    return database
+  })
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+const waitFor = async (testFn, timeout) => {
   timeout = timeout || 10 * 1000
   const startTime = Date.now()
+  let delay = 10
 
   const next = async () => {
     if (Date.now() - startTime > timeout) {
       throw new Error(`Wait timeout exceeded for url: ${url}`)
     }
-    return fetch(url, url.startsWith('https') ? insecureOption : {})
-      .then(onResponse || onResponseNoop)
-      .catch(() => wait(200).then(next))
+    return testFn().catch(() => {
+      delay = Math.min(500, delay * 2)
+      return wait(delay).then(next)
+    })
   }
 
   return next()
-}
-
-const waitForDatabase = async (url, timeout) => {
-  return waitForUrl(`${url}/api/database.json`, timeout, res => {
-    if (!res.ok) {
-      throw new Error(`Database response is not successfull: Code is ${res.status}`)
-    }
-    return res.json().then(database => {
-      if (!database.data.length) {
-        return Promise.reject(new Error(`Database is empty`))
-      }
-      return database
-    })
-  })
 }
 
 const createServerId = () => {
@@ -68,7 +71,7 @@ const startServer = async (args = []) => {
   }
   gauge.dataStore.scenarioStore.put('serverUrl', url)
 
-  return waitForUrl(url, 10 * 1000)
+  return waitFor(() => fetchUrl(url), 10 * 1000)
 }
 
 step("Start server", startServer)
@@ -158,8 +161,20 @@ step("Start mock server", async () => {
 })
 
 step("Wait for database", async () => {
-  const serverUrl = gauge.dataStore.scenarioStore.get('serverUrl')
-  await waitForDatabase(serverUrl, 10 * 1000)
+  const url = gauge.dataStore.scenarioStore.get('serverUrl')
+  await waitFor(() => fetchDatabase(url), 5 * 1000)
+})
+
+step("Wait for current database", async () => {
+  const fileDatabase = await readDatabase()
+  const url = gauge.dataStore.scenarioStore.get('serverUrl')
+  return waitFor(() => fetchDatabase(url)
+    .then(database => {
+      if (database.created != fileDatabase.created) {
+        throw new Error(`Database created missmatch`)
+      }
+      return database
+    }), 5 * 1000)
 })
 
 const killChildProcess = async child => {
