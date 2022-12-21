@@ -27,6 +27,7 @@ LABEL org.opencontainers.image.source="https://github.com/xemle/home-gallery"
 
 RUN apk add --no-cache \
   ffmpeg \
+  intel-media-driver \
   vips-tools \
   perl
 

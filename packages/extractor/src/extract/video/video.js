@@ -17,6 +17,43 @@ function convertVideo(storage, entry, ffprobePath, ffmpegPath, cb) {
   const intervalMs = 30*1000;
   let last = Date.now();
   const command = ffmpeg(input);
+
+  if (process.env.FFMPEG_ENCODE_MASK){
+    let cmd =  process.env.FFMPEG_ENCODE_MASK.replace(/"/g, '')
+    let cmd_arr =  cmd.split(' ')
+    cmd_arr[cmd_arr.indexOf('{INPUT}')] = input
+    cmd_arr[cmd_arr.indexOf('{OUTPUT}')] = tmpFile
+    const child_process = require('child_process');
+		let cp = child_process.spawn(
+			'ffmpeg', cmd_arr
+		);
+    
+    cp.on('error', (err) => {
+      console.log("\n\t\tERROR: spawn failed! (" + err + ")");
+    });
+
+    cp.stderr.on('data', function(data) {
+      console.log('stdout: ' +data);
+    });
+		cp.on('exit', (code) => {
+			if (code == 0){
+        fs.rename(tmpFile, file, (err) => {
+          if (err) {
+            log.error(err, `Could not rename file ${tmpFile} to ${file} for ${entry}`)
+            return cb();
+          }
+          storage.addEntryFilename(entry, videoSuffix);
+          log.info(t0, `Video conversion of ${entry} done`);
+          cb();
+        })
+			}
+			else{
+				console.log(`ERROR 220205, code = ${code}`, cmd);
+        cb();
+			}
+		});
+    return;
+  }
   command.setFfmpegPath(ffmpegPath);
   command.setFfprobePath(ffprobePath);
   command
