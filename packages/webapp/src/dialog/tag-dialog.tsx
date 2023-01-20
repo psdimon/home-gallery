@@ -1,10 +1,16 @@
 import * as React from "react";
-import { useState } from "react";
+import { useState, useReducer, useEffect } from "react";
 
 import { useEventStore } from '../store/event-store'
+import { useEntryStore } from '../store/entry-store'
+import { TagInput } from "./tag-input";
+import { Tag } from "../api/models";
+import { RecentTags } from "./recent-tags";
+import { MultiTagHelp, SingleTagHelp } from "./tag-dialog-help";
+import { useDialogStore } from "./tag-dialog-store";
 
 export interface TagDialogFormData {
-  tags: string;
+  tags: Tag[];
 }
 
 export interface TagDialogProps {
@@ -13,54 +19,46 @@ export interface TagDialogProps {
   onSubmit: (data: TagDialogFormData) => void;
 }
 
-const Tags = ({tags, addTag}) => {
-  return tags.map((tag, i, a) => (
-    <a key={i} onClick={() => addTag(tag)} className="mr-4" title={`Click to tag '${tag}'`}>{tag}{i < a.length - 1 ? ',' : ''}</a>
-  ))
+export interface SingleTagDialogProps extends TagDialogProps {
+  tags: Tag[];
 }
 
-export const TagDialog = ({onCancel, onSubmit, visible}: TagDialogProps) => {
-  const [tags, setTags] = useState("");
-  const recentTags = useEventStore(state => state.recentTags);
+const useAllTags = () => {
+  const [allTags, setAllTags] = useState<string[]>([])
+  const allEntries = useEntryStore(state => state.allEntries);
 
-  const submitHandler = (event) => {
-    event.preventDefault();
-    onSubmit({ tags });
-  }
+  useEffect(() => {
+    const newAllTags = allEntries.reduce((result, entry) => {
+      if (!entry.tags?.length) {
+        return result
+      }
+      entry.tags.forEach((tag: string) => {
+        if (!result.includes(tag)) {
+          result.push(tag)
+        }
+      })
+      return result
+    }, [] as string[]).sort()
+    setAllTags(newAllTags)
+  }, [allEntries])
 
-  const addTag = tag => setTags(value => {
-    const match = value.match(new RegExp(`\\b(${tag}\\s*(,\\s*)?)`))
-    if (match) {
-      return value.replace(match[1], '');
-    }
+  return allTags
+}
 
-    const strip = value.replace(/\s*,\s*$/, '')
-    if (strip.length) {
-      return `${strip}, ${tag}`
-    }
-    return tag;
-  });
-
+const Dialog = ({visible, title, onCancel, onSubmit, children}) => {
   return (
     <div className={`modal ${visible ? '-visible' : ''}`}>
       <div className="modal__backdrop"></div>
       <div className="modal__overlay">
         <div className="dialog text">
-          <div className="dialog__header -closeable">
-            <h3>Edit Tags</h3>
+          <div className="dialog__header">
+            <h3>{title}</h3>
             <button className="button -closeable" onClick={onCancel}><i className="fas fa-times"></i></button>
           </div>
-          <form onSubmit={submitHandler}>
+          <form autoComplete="off" onSubmit={onSubmit}>
             <div className="dialog__scroll-container">
               <div className="dialog__content">
-                <div className="field">
-                  <label htmlFor="tags">Input</label>
-                  <input id="tags" className="input" ref={input => input && input.focus()} value={tags} onChange={e => setTags(e.target.value)} />
-                  {recentTags.length > 0 &&
-                    <div>
-                      Recent tags: <Tags tags={recentTags.slice(0, 5)} addTag={addTag} />
-                    </div>}
-                </div>
+                {children}
               </div>
             </div>
             <div className="dialog__footer -grey">
@@ -76,3 +74,74 @@ export const TagDialog = ({onCancel, onSubmit, visible}: TagDialogProps) => {
   )
 }
 
+export const MultiTagDialog = ({onCancel, onSubmit, visible}: TagDialogProps) => {
+  const [state, dispatch] = useDialogStore();
+  const [showHelp, setShowHelp] = useState(false)
+
+  const recentTags = useEventStore(state => state.recentTags);
+  const allTags = useAllTags()
+
+  useEffect(() => {
+    dispatch({type: 'setAllTags', value: allTags})
+  }, [allTags])
+
+  const getFinalTags = () => {
+    const tags = [...state.tags]
+    if (state.inputValue.length) {
+      tags.push({name: state.inputValue, remove: false})
+    }
+    return tags
+  }
+
+  const submitHandler = (event) => {
+    event.preventDefault();
+    onSubmit({ tags: getFinalTags() });
+  }
+
+  return (
+    <Dialog visible={visible} title='Edit Tags' onSubmit={submitHandler} onCancel={onCancel} >
+      <div className="field">
+        <label htmlFor="tags">Add Tags <a className="fas fa-question-circle" onClick={() => setShowHelp(show => !show)} title="Show help for tag input"></a></label>
+        <MultiTagHelp show={showHelp} setShow={setShowHelp} />
+        <TagInput tags={state.tags} withRemove={true} suggestions={state.suggestions} showSuggestions={state.showSuggestions} dispatch={dispatch} value={state.inputValue} />
+        <RecentTags tags={recentTags} dispatch={dispatch} />
+      </div>
+    </Dialog>
+  )
+}
+
+export const SingleTagDialog = ({tags, onCancel, onSubmit, visible}: SingleTagDialogProps) => {
+  const [state, dispatch] = useDialogStore({tags})
+  const [showHelp, setShowHelp] = useState(false)
+
+  const recentTags = useEventStore(state => state.recentTags);
+  const allTags = useAllTags()
+
+  useEffect(() => {
+    dispatch({type: 'setAllTags', value: allTags})
+  }, [allTags])
+
+  const getFinalTags = () => {
+    const tags = [...state.tags]
+    if (state.inputValue.length) {
+      tags.push({name: state.inputValue, remove: false})
+    }
+    return tags
+  }
+
+  const submitHandler = (event) => {
+    event.preventDefault();
+    onSubmit({ tags: getFinalTags() });
+  }
+
+  return (
+    <Dialog visible={visible} title='Edit Media Tags' onSubmit={submitHandler} onCancel={onCancel} >
+      <div className="field">
+        <label htmlFor="tags">Add Tags <a className="fas fa-question-circle" onClick={() => setShowHelp(show => !show)} title="Show help for tag input"></a></label>
+        <SingleTagHelp show={showHelp} setShow={setShowHelp} />
+        <TagInput tags={state.tags} withRemove={false} suggestions={state.suggestions} showSuggestions={state.showSuggestions} dispatch={dispatch} value={state.inputValue} />
+        <RecentTags tags={recentTags} dispatch={dispatch} />
+      </div>
+    </Dialog>
+  )
+}
